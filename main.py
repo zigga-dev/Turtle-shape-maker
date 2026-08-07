@@ -17,12 +17,45 @@ MIN_POINTS = 3
 HIGHLIGHT = "#1e90ff"  # unfinished part and mouse marker
 
 
-# Grid maths: grid points <-> canvas pixels
+# Drawing logic
+
+class ShapeError(Exception):
+    """Error with a message to show the user."""
+
 
 def in_grid(point):
     x, y = point
     return abs(x) <= GRID_RANGE and abs(y) <= GRID_RANGE
 
+
+class Drawing:
+    """Holds the finished parts and the part being drawn."""
+
+    def __init__(self):
+        self.parts = []  # finished parts, each a tuple of (x, y) points
+        self.current = []  # (x, y) points of the unfinished part
+
+    def is_start(self, point):
+        return len(self.current) > 0 and point == self.current[0]
+
+    def add_point(self, point):
+        if not in_grid(point):
+            raise ShapeError("Click inside the grid.")
+        if point in self.current:
+            raise ShapeError("That point is already in this part.")
+        self.current.append(point)
+
+    def finish_part(self):
+        points = self.current
+        if not points:
+            raise ShapeError("Click the grid to start a part first.")
+        if len(points) < MIN_POINTS:
+            raise ShapeError(f"A part needs at least {MIN_POINTS} points.")
+        self.parts.append(tuple(points))
+        self.current = []
+
+
+# Grid maths: grid points <-> canvas pixels
 
 def point_to_pixel(point):
     x, y = point
@@ -50,8 +83,7 @@ class ShapeMakerApp:
 
     def __init__(self, root):
         self.root = root
-        self.parts = []  # finished parts, each a tuple of (x, y) points
-        self.points = []  # (x, y) points of the part being drawn
+        self.drawing = Drawing()
         self.message = tk.StringVar()
         self.mouse_position = tk.StringVar()
 
@@ -61,7 +93,7 @@ class ShapeMakerApp:
         self.build_window()
         self.draw_grid()
         self.bind_events()
-        self.message.set("Click a grid point to start drawing a part.")
+        self.say("Click a grid point to start drawing a part.")
 
     def build_window(self):
         self.canvas = tk.Canvas(self.root, width=CANVAS_SIZE,
@@ -71,7 +103,8 @@ class ShapeMakerApp:
 
         bottom = tk.Frame(self.root)
         bottom.pack(fill="x", padx=12, pady=(6, 12))
-        tk.Label(bottom, textvariable=self.message).pack(side="left")
+        self.message_label = tk.Label(bottom, textvariable=self.message)
+        self.message_label.pack(side="left")
         tk.Label(bottom, textvariable=self.mouse_position).pack(side="right")
 
     def draw_grid(self):
@@ -104,18 +137,26 @@ class ShapeMakerApp:
         self.canvas.bind("<Leave>", self.mouse_left)
         self.root.bind("<Return>", lambda event: self.finish_part())
 
+    def say(self, text, problem=False):
+        # red for problems
+        self.message.set(text)
+        if problem:
+            self.message_label.config(fg="#c0392b")
+        else:
+            self.message_label.config(fg="black")
+
     def redraw(self):
         # only delete "shapes" so the grid stays
         self.canvas.delete("shapes")
         # TODO: let the user pick the colours
-        for points in self.parts:
+        for points in self.drawing.parts:
             self.canvas.create_polygon(to_pixels(points), fill="green",
                                        outline="black", width=2,
                                        tags="shapes")
         self.draw_unfinished_part()
 
     def draw_unfinished_part(self):
-        points = self.points
+        points = self.drawing.current
         if len(points) >= 2:
             self.canvas.create_line(to_pixels(points), fill=HIGHLIGHT,
                                     width=2, tags="shapes")
@@ -133,19 +174,18 @@ class ShapeMakerApp:
 
     def canvas_clicked(self, event):
         point = pixel_to_point(event.x, event.y)
-        if not in_grid(point):
-            self.message.set("Click inside the grid.")
-            return
         # Clicking the first point again finishes the part.
-        if self.points and point == self.points[0]:
+        if self.drawing.is_start(point):
             self.finish_part()
             return
-        if point in self.points:
-            self.message.set("That point is already in this part.")
-            return
 
-        self.points.append(point)
-        self.message.set(f"Point {len(self.points)} added at {point}.")
+        try:
+            self.drawing.add_point(point)
+        except ShapeError as problem:
+            self.say(str(problem), problem=True)
+        else:
+            # only runs if it worked
+            self.say(f"Point {len(self.drawing.current)} added at {point}.")
         self.redraw()
 
     def mouse_moved(self, event):
@@ -165,12 +205,12 @@ class ShapeMakerApp:
         self.mouse_position.set("")
 
     def finish_part(self):
-        if len(self.points) < MIN_POINTS:
-            self.message.set(f"A part needs at least {MIN_POINTS} points.")
+        try:
+            self.drawing.finish_part()
+        except ShapeError as problem:
+            self.say(str(problem), problem=True)
             return
-        self.parts.append(tuple(self.points))
-        self.points = []
-        self.message.set(f"Part {len(self.parts)} finished.")
+        self.say(f"Part {len(self.drawing.parts)} finished.")
         self.redraw()
 
 
