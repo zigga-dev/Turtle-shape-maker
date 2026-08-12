@@ -13,7 +13,9 @@ MARGIN = 28  # pixels around the grid for the axis numbers
 CANVAS_SIZE = 2 * (MARGIN + GRID_RANGE * CELL)
 CENTRE = CANVAS_SIZE // 2  # pixel position of (0, 0)
 
+# Drawing rules.
 MIN_POINTS = 3
+
 HIGHLIGHT = "#1e90ff"  # unfinished part and mouse marker
 
 
@@ -26,6 +28,38 @@ class ShapeError(Exception):
 def in_grid(point):
     x, y = point
     return abs(x) <= GRID_RANGE and abs(y) <= GRID_RANGE
+
+
+def cross(a, b, c):
+    """Return > 0 if a -> b -> c turns left, < 0 if right, 0 if straight."""
+    (ax, ay), (bx, by), (cx, cy) = a, b, c
+    # The cross product of the vectors a->b and a->c.
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+
+
+def on_segment(p, a, b):
+    (px, py), (ax, ay), (bx, by) = p, a, b
+    # p must be on the line through a and b, and inside the box around them.
+    return (cross(a, b, p) == 0
+            and min(ax, bx) <= px <= max(ax, bx)
+            and min(ay, by) <= py <= max(ay, by))
+
+
+def segments_meet(a, b, c, d):
+    """Return True if segment a-b crosses or touches segment c-d."""
+    # proper cross: a, b on opposite sides of c-d and c, d on
+    # opposite sides of a-b
+    if (cross(c, d, a) * cross(c, d, b) < 0
+            and cross(a, b, c) * cross(a, b, d) < 0):
+        return True
+    # touching: an end point lies on the other segment
+    return (on_segment(a, c, d) or on_segment(b, c, d)
+            or on_segment(c, a, b) or on_segment(d, a, b))
+
+
+def all_in_line(points):
+    # Every point is in line with the first two points.
+    return all(cross(points[0], points[1], point) == 0 for point in points)
 
 
 class Drawing:
@@ -43,6 +77,18 @@ class Drawing:
             raise ShapeError("Click inside the grid.")
         if point in self.current:
             raise ShapeError("That point is already in this part.")
+
+        # The new line goes from the last point to this point. It must not
+        # meet any earlier line.
+        if len(self.current) >= 2:
+            last = self.current[-1]
+            # skip the newest line, it always touches the new one
+            for i in range(len(self.current) - 2):
+                if segments_meet(self.current[i], self.current[i + 1],
+                                 last, point):
+                    raise ShapeError("That line would cross another line "
+                                     "in this part.")
+
         self.current.append(point)
 
     def finish_part(self):
@@ -51,6 +97,21 @@ class Drawing:
             raise ShapeError("Click the grid to start a part first.")
         if len(points) < MIN_POINTS:
             raise ShapeError(f"A part needs at least {MIN_POINTS} points.")
+        if all_in_line(points):
+            raise ShapeError("These points are all in one straight line, "
+                             "so the part would have no inside.")
+
+        # Finishing adds a closing line from the last point to the first.
+        # add_point already checked every other line, so only this one is
+        # left. It must not meet a line that doesn't share one of its ends.
+        # The first and last lines share an end with it, so the loop skips
+        # them.
+        first, last = points[0], points[-1]
+        for i in range(1, len(points) - 2):
+            if segments_meet(points[i], points[i + 1], last, first):
+                raise ShapeError("Joining the last point to the first "
+                                 "would cross a line.")
+
         self.parts.append(tuple(points))
         self.current = []
 
