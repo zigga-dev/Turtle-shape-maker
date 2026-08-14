@@ -57,6 +57,14 @@ def segments_meet(a, b, c, d):
             or on_segment(c, a, b) or on_segment(d, a, b))
 
 
+def turns_back(a, b, c):
+    """Return True if a -> b -> c goes back along line a-b."""
+    (ax, ay), (bx, by), (cx, cy) = a, b, c
+    # dot product > 0 means c is on the same side of b as a
+    same_side = (ax - bx) * (cx - bx) + (ay - by) * (cy - by) > 0
+    return cross(a, b, c) == 0 and same_side
+
+
 def all_in_line(points):
     # Every point is in line with the first two points.
     return all(cross(points[0], points[1], point) == 0 for point in points)
@@ -79,9 +87,12 @@ class Drawing:
             raise ShapeError("That point is already in this part.")
 
         # The new line goes from the last point to this point. It must not
-        # meet any earlier line.
+        # double back over the last line, or meet any earlier line.
         if len(self.current) >= 2:
             last = self.current[-1]
+            if turns_back(self.current[-2], last, point):
+                raise ShapeError("That line would go back over the last "
+                                 "one.")
             # skip the newest line, it always touches the new one
             for i in range(len(self.current) - 2):
                 if segments_meet(self.current[i], self.current[i + 1],
@@ -103,16 +114,31 @@ class Drawing:
 
         # Finishing adds a closing line from the last point to the first.
         # add_point already checked every other line, so only this one is
-        # left. It must not meet a line that doesn't share one of its ends.
-        # The first and last lines share an end with it, so the loop skips
-        # them.
+        # left. It must not double back at either end...
         first, last = points[0], points[-1]
+        crosses = (turns_back(points[-2], last, first)
+                   or turns_back(last, first, points[1]))
+        # ...or meet a line that doesn't share one of its ends. The first
+        # and last lines share an end with it, so the loop skips them.
         for i in range(1, len(points) - 2):
             if segments_meet(points[i], points[i + 1], last, first):
-                raise ShapeError("Joining the last point to the first "
-                                 "would cross a line.")
+                crosses = True
+        if crosses:
+            raise ShapeError("Joining the last point to the first would "
+                             "cross a line. Undo a point and try another "
+                             "way round.")
 
         self.parts.append(tuple(points))
+        self.current = []
+
+    def undo_point(self):
+        # Returns False when there is nothing to undo.
+        if not self.current:
+            return False
+        self.current.pop()
+        return True
+
+    def cancel_part(self):
         self.current = []
 
 
@@ -194,9 +220,14 @@ class ShapeMakerApp:
 
     def bind_events(self):
         self.canvas.bind("<Button-1>", self.canvas_clicked)
+        # Right-click undoes a point.
+        self.canvas.bind("<Button-3>", lambda event: self.undo_point())
         self.canvas.bind("<Motion>", self.mouse_moved)
         self.canvas.bind("<Leave>", self.mouse_left)
+        # TODO: buttons for finish / undo / cancel
+        # Bound to the whole window, so they work wherever the focus is.
         self.root.bind("<Return>", lambda event: self.finish_part())
+        self.root.bind("<Escape>", lambda event: self.cancel_part())
 
     def say(self, text, problem=False):
         # red for problems
@@ -272,6 +303,21 @@ class ShapeMakerApp:
             self.say(str(problem), problem=True)
             return
         self.say(f"Part {len(self.drawing.parts)} finished.")
+        self.redraw()
+
+    def undo_point(self):
+        if self.drawing.undo_point():
+            self.say("The last point was removed.")
+        else:
+            self.say("There is no point to undo.", problem=True)
+        self.redraw()
+
+    def cancel_part(self):
+        if not self.drawing.current:
+            self.say("There is no unfinished part to cancel.", problem=True)
+            return
+        self.drawing.cancel_part()
+        self.say("The unfinished part was removed.")
         self.redraw()
 
 
