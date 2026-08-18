@@ -1,6 +1,7 @@
 """Turtle Shape Maker - draw shapes for turtle."""
 
 import tkinter as tk
+from tkinter import ttk
 
 APP_NAME = "Turtle Shape Maker"
 
@@ -166,7 +167,7 @@ def to_pixels(points):
 # The window
 
 class ShapeMakerApp:
-    """The main window: the grid and a status line."""
+    """The main window: grid, controls and status line."""
 
     def __init__(self, root):
         self.root = root
@@ -183,16 +184,46 @@ class ShapeMakerApp:
         self.say("Click a grid point to start drawing a part.")
 
     def build_window(self):
-        self.canvas = tk.Canvas(self.root, width=CANVAS_SIZE,
-                                height=CANVAS_SIZE, background="white",
-                                highlightthickness=0, cursor="crosshair")
-        self.canvas.pack(padx=12, pady=(12, 0))
+        frame = ttk.Frame(self.root, padding=12)
+        frame.pack()
 
-        bottom = tk.Frame(self.root)
-        bottom.pack(fill="x", padx=12, pady=(6, 12))
-        self.message_label = tk.Label(bottom, textvariable=self.message)
-        self.message_label.pack(side="left")
-        tk.Label(bottom, textvariable=self.mouse_position).pack(side="right")
+        self.canvas = tk.Canvas(frame, width=CANVAS_SIZE, height=CANVAS_SIZE,
+                                background="white", highlightthickness=0,
+                                cursor="crosshair")
+        self.canvas.grid(row=0, column=0, sticky="n")
+
+        panel = ttk.Frame(frame, padding=(12, 0, 0, 0))
+        panel.grid(row=0, column=1, sticky="n")
+        self.build_panel(panel)
+
+        # wraplength makes long messages wrap instead of widening the window.
+        self.message_label = ttk.Label(frame, textvariable=self.message,
+                                       wraplength=CANVAS_SIZE)
+        self.message_label.grid(row=1, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(frame, textvariable=self.mouse_position).grid(
+            row=1, column=1, sticky="e", pady=(10, 0))
+
+    def build_panel(self, panel):
+        self.add_heading(panel, "Part being drawn", first=True)
+        self.add_button_row(panel, [("Finish", self.finish_part),
+                                    ("Undo", self.undo_point),
+                                    ("Cancel", self.cancel_part)])
+
+    def add_heading(self, panel, text, first=False):
+        top_gap = 0 if first else 10
+        ttk.Label(panel, text=text, font="TkHeadingFont").pack(
+            anchor="w", pady=(top_gap, 3))
+
+    def add_button_row(self, panel, buttons):
+        # buttons is a list of (text, command) pairs.
+        row = ttk.Frame(panel)
+        row.pack(fill="x", pady=(3, 0))
+        for column, (text, command) in enumerate(buttons):
+            # uniform makes the buttons the same width
+            row.columnconfigure(column, weight=1, uniform="buttons")
+            left_gap = 0 if column == 0 else 3
+            ttk.Button(row, text=text, command=command).grid(
+                row=0, column=column, sticky="ew", padx=(left_gap, 0))
 
     def draw_grid(self):
         # light lines first so the darker ones end up on top
@@ -224,18 +255,17 @@ class ShapeMakerApp:
         self.canvas.bind("<Button-3>", lambda event: self.undo_point())
         self.canvas.bind("<Motion>", self.mouse_moved)
         self.canvas.bind("<Leave>", self.mouse_left)
-        # TODO: buttons for finish / undo / cancel
         # Bound to the whole window, so they work wherever the focus is.
         self.root.bind("<Return>", lambda event: self.finish_part())
         self.root.bind("<Escape>", lambda event: self.cancel_part())
 
     def say(self, text, problem=False):
-        # red for problems
+        # red for problems, "" = normal colour
         self.message.set(text)
         if problem:
-            self.message_label.config(fg="#c0392b")
+            self.message_label.config(foreground="#c0392b")
         else:
-            self.message_label.config(fg="black")
+            self.message_label.config(foreground="")
 
     def redraw(self):
         # only delete "shapes" so the grid stays
@@ -246,6 +276,7 @@ class ShapeMakerApp:
                                        outline="black", width=2,
                                        tags="shapes")
         self.draw_unfinished_part()
+        self.canvas.tag_raise("marker")  # keep the mouse ring on top
 
     def draw_unfinished_part(self):
         points = self.drawing.current
