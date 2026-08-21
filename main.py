@@ -1,5 +1,6 @@
 """Turtle Shape Maker - draw shapes for turtle."""
 
+import math
 import tkinter as tk
 from tkinter import ttk
 
@@ -16,6 +17,16 @@ CENTRE = CANVAS_SIZE // 2  # pixel position of (0, 0)
 
 # Drawing rules.
 MIN_POINTS = 3
+
+# Colour names that tkinter and turtle both accept.
+COLOURS = ("black", "grey", "white", "brown", "red", "orange",
+           "yellow", "green", "cyan", "blue", "purple", "pink")
+START_FILL = "green"
+START_OUTLINE = "black"
+SWATCH = 20  # colour square size
+SWATCH_GAP = 6
+SWATCH_STEP = SWATCH + SWATCH_GAP  # distance from one square to the next
+PALETTE_COLUMNS = 6
 
 HIGHLIGHT = "#1e90ff"  # unfinished part and mouse marker
 
@@ -75,7 +86,7 @@ class Drawing:
     """Holds the finished parts and the part being drawn."""
 
     def __init__(self):
-        self.parts = []  # finished parts, each a tuple of (x, y) points
+        self.parts = []  # finished (points, fill, outline) tuples
         self.current = []  # (x, y) points of the unfinished part
 
     def is_start(self, point):
@@ -103,7 +114,7 @@ class Drawing:
 
         self.current.append(point)
 
-    def finish_part(self):
+    def finish_part(self, fill, outline):
         points = self.current
         if not points:
             raise ShapeError("Click the grid to start a part first.")
@@ -129,7 +140,7 @@ class Drawing:
                              "cross a line. Undo a point and try another "
                              "way round.")
 
-        self.parts.append(tuple(points))
+        self.parts.append((tuple(points), fill, outline))
         self.current = []
 
     def undo_point(self):
@@ -165,6 +176,46 @@ def to_pixels(points):
 
 
 # The window
+
+class ColourPalette:
+    """A grid of colour squares. Clicking a square picks its colour."""
+
+    def __init__(self, parent, chosen):
+        self.chosen = chosen
+        rows = math.ceil(len(COLOURS) / PALETTE_COLUMNS)
+        self.canvas = tk.Canvas(parent, width=PALETTE_COLUMNS * SWATCH_STEP,
+                                height=rows * SWATCH_STEP,
+                                highlightthickness=0, cursor="hand2")
+        self.canvas.bind("<Button-1>", self.clicked)
+        self.draw()
+
+    def draw(self):
+        self.canvas.delete("all")
+        offset = SWATCH_GAP // 2  # half a gap around each square
+        for index, colour in enumerate(COLOURS):
+            # row and column of this square
+            row, column = divmod(index, PALETTE_COLUMNS)
+            x = column * SWATCH_STEP + offset
+            y = row * SWATCH_STEP + offset
+            self.canvas.create_rectangle(x, y, x + SWATCH, y + SWATCH,
+                                         fill=colour, outline="#999999")
+            if colour == self.chosen:
+                # A ring in the gap around the chosen square.
+                ring = offset - 1
+                self.canvas.create_rectangle(
+                    x - ring, y - ring, x + SWATCH + ring, y + SWATCH + ring,
+                    outline=HIGHLIGHT, width=2)
+
+    def clicked(self, event):
+        # which square was clicked?
+        column = event.x // SWATCH_STEP
+        row = event.y // SWATCH_STEP
+        index = row * PALETTE_COLUMNS + column
+        if column < PALETTE_COLUMNS and index < len(COLOURS):
+            self.chosen = COLOURS[index]
+            print(self.chosen)
+            self.draw()
+
 
 class ShapeMakerApp:
     """The main window: grid, controls and status line."""
@@ -204,7 +255,15 @@ class ShapeMakerApp:
             row=1, column=1, sticky="e", pady=(10, 0))
 
     def build_panel(self, panel):
-        self.add_heading(panel, "Part being drawn", first=True)
+        self.add_heading(panel, "Fill colour", first=True)
+        self.fill_palette = ColourPalette(panel, START_FILL)
+        self.fill_palette.canvas.pack(anchor="w")
+
+        self.add_heading(panel, "Outline colour")
+        self.outline_palette = ColourPalette(panel, START_OUTLINE)
+        self.outline_palette.canvas.pack(anchor="w")
+
+        self.add_heading(panel, "Part being drawn")
         self.add_button_row(panel, [("Finish", self.finish_part),
                                     ("Undo", self.undo_point),
                                     ("Cancel", self.cancel_part)])
@@ -270,10 +329,9 @@ class ShapeMakerApp:
     def redraw(self):
         # only delete "shapes" so the grid stays
         self.canvas.delete("shapes")
-        # TODO: let the user pick the colours
-        for points in self.drawing.parts:
-            self.canvas.create_polygon(to_pixels(points), fill="green",
-                                       outline="black", width=2,
+        for points, fill, outline in self.drawing.parts:
+            self.canvas.create_polygon(to_pixels(points), fill=fill,
+                                       outline=outline, width=2,
                                        tags="shapes")
         self.draw_unfinished_part()
         self.canvas.tag_raise("marker")  # keep the mouse ring on top
@@ -329,7 +387,8 @@ class ShapeMakerApp:
 
     def finish_part(self):
         try:
-            self.drawing.finish_part()
+            self.drawing.finish_part(self.fill_palette.chosen,
+                                     self.outline_palette.chosen)
         except ShapeError as problem:
             self.say(str(problem), problem=True)
             return
