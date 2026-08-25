@@ -28,7 +28,7 @@ SWATCH_GAP = 6
 SWATCH_STEP = SWATCH + SWATCH_GAP  # distance from one square to the next
 PALETTE_COLUMNS = 6
 
-HIGHLIGHT = "#1e90ff"  # unfinished part and mouse marker
+HIGHLIGHT = "#1e90ff"  # unfinished part, selected part, mouse marker
 
 
 # Drawing logic
@@ -153,6 +153,9 @@ class Drawing:
     def cancel_part(self):
         self.current = []
 
+    def delete_part(self, index):
+        del self.parts[index]
+
 
 # Grid maths: grid points <-> canvas pixels
 
@@ -213,7 +216,6 @@ class ColourPalette:
         index = row * PALETTE_COLUMNS + column
         if column < PALETTE_COLUMNS and index < len(COLOURS):
             self.chosen = COLOURS[index]
-            print(self.chosen)
             self.draw()
 
 
@@ -268,6 +270,17 @@ class ShapeMakerApp:
                                     ("Undo", self.undo_point),
                                     ("Cancel", self.cancel_part)])
 
+        self.add_heading(panel, "Parts (later ones are on top)")
+        # The list and its scrollbar share a frame so they sit side by side.
+        list_frame = ttk.Frame(panel)
+        list_frame.pack(fill="x")
+        self.part_list = tk.Listbox(list_frame, height=5, activestyle="none")
+        scrollbar = ttk.Scrollbar(list_frame, command=self.part_list.yview)
+        self.part_list.config(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.part_list.pack(side="left", fill="x", expand=True)
+        self.add_button_row(panel, [("Delete", self.delete_part)])
+
     def add_heading(self, panel, text, first=False):
         top_gap = 0 if first else 10
         ttk.Label(panel, text=text, font="TkHeadingFont").pack(
@@ -314,6 +327,8 @@ class ShapeMakerApp:
         self.canvas.bind("<Button-3>", lambda event: self.undo_point())
         self.canvas.bind("<Motion>", self.mouse_moved)
         self.canvas.bind("<Leave>", self.mouse_left)
+        self.part_list.bind("<<ListboxSelect>>", self.part_selected)
+        self.part_list.bind("<Delete>", lambda event: self.delete_part())
         # Bound to the whole window, so they work wherever the focus is.
         self.root.bind("<Return>", lambda event: self.finish_part())
         self.root.bind("<Escape>", lambda event: self.cancel_part())
@@ -326,6 +341,21 @@ class ShapeMakerApp:
         else:
             self.message_label.config(foreground="")
 
+    def selected_index(self):
+        # curselection() is a tuple, empty if nothing is selected
+        selection = self.part_list.curselection()
+        if selection:
+            return selection[0]
+        return None
+
+    def refresh_list(self):
+        # Rebuilds the list from the drawing's parts.
+        self.part_list.delete(0, tk.END)
+        for number, (points, fill, _) in enumerate(self.drawing.parts,
+                                                   start=1):
+            self.part_list.insert(tk.END,
+                                  f"{number}. {fill} ({len(points)} points)")
+
     def redraw(self):
         # only delete "shapes" so the grid stays
         self.canvas.delete("shapes")
@@ -333,6 +363,15 @@ class ShapeMakerApp:
             self.canvas.create_polygon(to_pixels(points), fill=fill,
                                        outline=outline, width=2,
                                        tags="shapes")
+
+        # dashed outline on top for the selected part
+        index = self.selected_index()
+        if index is not None:
+            points = self.drawing.parts[index][0]
+            self.canvas.create_polygon(to_pixels(points), fill="",
+                                       outline=HIGHLIGHT, width=2,
+                                       dash=(5, 3), tags="shapes")
+
         self.draw_unfinished_part()
         self.canvas.tag_raise("marker")  # keep the mouse ring on top
 
@@ -392,6 +431,7 @@ class ShapeMakerApp:
         except ShapeError as problem:
             self.say(str(problem), problem=True)
             return
+        self.refresh_list()
         self.say(f"Part {len(self.drawing.parts)} finished.")
         self.redraw()
 
@@ -408,6 +448,23 @@ class ShapeMakerApp:
             return
         self.drawing.cancel_part()
         self.say("The unfinished part was removed.")
+        self.redraw()
+
+    def part_selected(self, event):
+        index = self.selected_index()
+        if index is not None:
+            # TODO: change the selected part's colour
+            self.say(f"Part {index + 1} selected. Press Delete to remove it.")
+        self.redraw()
+
+    def delete_part(self):
+        index = self.selected_index()
+        if index is None:
+            self.say("Select a part in the list first.", problem=True)
+            return
+        self.drawing.delete_part(index)
+        self.refresh_list()
+        self.say(f"Part {index + 1} was deleted.")
         self.redraw()
 
 
