@@ -2,7 +2,7 @@
 
 import math
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 APP_NAME = "Turtle Shape Maker"
 
@@ -35,6 +35,15 @@ HIGHLIGHT = "#1e90ff"  # unfinished part, selected part, mouse marker
 
 class ShapeError(Exception):
     """Error with a message to show the user."""
+
+
+class Part:
+    """One filled polygon in the shape."""
+
+    def __init__(self, points, fill, outline):
+        self.points = points  # tuple of (x, y) tuples
+        self.fill = fill
+        self.outline = outline
 
 
 def in_grid(point):
@@ -83,11 +92,18 @@ def all_in_line(points):
 
 
 class Drawing:
-    """Holds the finished parts and the part being drawn."""
+    """The finished parts, plus the part being drawn.
+
+    Every change is checked first, and a ShapeError is raised if it breaks
+    a rule, so the drawing can never hold a broken part.
+    """
 
     def __init__(self):
-        self.parts = []  # finished (points, fill, outline) tuples
+        self.parts = []  # finished Part objects, back to front
         self.current = []  # (x, y) points of the unfinished part
+
+    def is_empty(self):
+        return not self.parts and not self.current
 
     def is_start(self, point):
         return len(self.current) > 0 and point == self.current[0]
@@ -140,8 +156,10 @@ class Drawing:
                              "cross a line. Undo a point and try another "
                              "way round.")
 
-        self.parts.append((tuple(points), fill, outline))
+        part = Part(tuple(points), fill, outline)
+        self.parts.append(part)
         self.current = []
+        return part
 
     def undo_point(self):
         # Returns False when there is nothing to undo.
@@ -155,6 +173,18 @@ class Drawing:
 
     def delete_part(self, index):
         del self.parts[index]
+
+    def recolour(self, index, kind, colour):
+        # kind is "fill" or "outline".
+        part = self.parts[index]
+        if kind == "fill":
+            part.fill = colour
+        else:
+            part.outline = colour
+
+    def clear(self):
+        self.parts = []
+        self.current = []
 
 
 # Grid maths: grid points <-> canvas pixels
@@ -183,13 +213,20 @@ def to_pixels(points):
 class ColourPalette:
     """A grid of colour squares. Clicking a square picks its colour."""
 
-    def __init__(self, parent, chosen):
+    def __init__(self, parent, chosen, on_pick):
         self.chosen = chosen
+        self.on_pick = on_pick  # called with the colour name when clicked
         rows = math.ceil(len(COLOURS) / PALETTE_COLUMNS)
         self.canvas = tk.Canvas(parent, width=PALETTE_COLUMNS * SWATCH_STEP,
                                 height=rows * SWATCH_STEP,
                                 highlightthickness=0, cursor="hand2")
         self.canvas.bind("<Button-1>", self.clicked)
+        self.draw()
+
+    def show(self, colour):
+        # Marks a colour without calling on_pick (used when a part is
+        # selected in the list).
+        self.chosen = colour
         self.draw()
 
     def draw(self):
@@ -215,8 +252,8 @@ class ColourPalette:
         row = event.y // SWATCH_STEP
         index = row * PALETTE_COLUMNS + column
         if column < PALETTE_COLUMNS and index < len(COLOURS):
-            self.chosen = COLOURS[index]
-            self.draw()
+            self.show(COLOURS[index])
+            self.on_pick(COLOURS[index])
 
 
 class ShapeMakerApp:
@@ -257,12 +294,17 @@ class ShapeMakerApp:
             row=1, column=1, sticky="e", pady=(10, 0))
 
     def build_panel(self, panel):
+        # The lambdas tell colour_picked which palette was clicked.
         self.add_heading(panel, "Fill colour", first=True)
-        self.fill_palette = ColourPalette(panel, START_FILL)
+        self.fill_palette = ColourPalette(
+            panel, START_FILL,
+            lambda colour: self.colour_picked("fill", colour))
         self.fill_palette.canvas.pack(anchor="w")
 
         self.add_heading(panel, "Outline colour")
-        self.outline_palette = ColourPalette(panel, START_OUTLINE)
+        self.outline_palette = ColourPalette(
+            panel, START_OUTLINE,
+            lambda colour: self.colour_picked("outline", colour))
         self.outline_palette.canvas.pack(anchor="w")
 
         self.add_heading(panel, "Part being drawn")
@@ -279,7 +321,8 @@ class ShapeMakerApp:
         self.part_list.config(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         self.part_list.pack(side="left", fill="x", expand=True)
-        self.add_button_row(panel, [("Delete", self.delete_part)])
+        self.add_button_row(panel, [("Delete", self.delete_part),
+                                    ("Clear all", self.clear_all)])
 
     def add_heading(self, panel, text, first=False):
         top_gap = 0 if first else 10
@@ -348,29 +391,32 @@ class ShapeMakerApp:
             return selection[0]
         return None
 
-    def refresh_list(self):
-        # Rebuilds the list from the drawing's parts.
+    def refresh_list(self, keep=None):
+        # Rebuilds the list, then reselects row keep if one is given.
         self.part_list.delete(0, tk.END)
-        for number, (points, fill, _) in enumerate(self.drawing.parts,
-                                                   start=1):
-            self.part_list.insert(tk.END,
-                                  f"{number}. {fill} ({len(points)} points)")
+        for number, part in enumerate(self.drawing.parts, start=1):
+            self.part_list.insert(
+                tk.END, f"{number}. {part.fill} ({len(part.points)} points)")
+        if keep is not None:
+            # rebuilding loses the scroll and active row, so put them back
+            self.part_list.selection_set(keep)
+            self.part_list.activate(keep)
+            self.part_list.see(keep)
 
     def redraw(self):
         # only delete "shapes" so the grid stays
         self.canvas.delete("shapes")
-        for points, fill, outline in self.drawing.parts:
-            self.canvas.create_polygon(to_pixels(points), fill=fill,
-                                       outline=outline, width=2,
-                                       tags="shapes")
+        for part in self.drawing.parts:
+            self.canvas.create_polygon(to_pixels(part.points),
+                                       fill=part.fill, outline=part.outline,
+                                       width=2, tags="shapes")
 
         # dashed outline on top for the selected part
         index = self.selected_index()
         if index is not None:
-            points = self.drawing.parts[index][0]
-            self.canvas.create_polygon(to_pixels(points), fill="",
-                                       outline=HIGHLIGHT, width=2,
-                                       dash=(5, 3), tags="shapes")
+            self.canvas.create_polygon(
+                to_pixels(self.drawing.parts[index].points), fill="",
+                outline=HIGHLIGHT, width=2, dash=(5, 3), tags="shapes")
 
         self.draw_unfinished_part()
         self.canvas.tag_raise("marker")  # keep the mouse ring on top
@@ -399,6 +445,8 @@ class ShapeMakerApp:
             self.finish_part()
             return
 
+        # Deselect parts so colour picks apply to the new part.
+        self.part_list.selection_clear(0, tk.END)
         try:
             self.drawing.add_point(point)
         except ShapeError as problem:
@@ -451,10 +499,26 @@ class ShapeMakerApp:
         self.redraw()
 
     def part_selected(self, event):
+        # Show the part's colours in the palettes, so picking a colour now
+        # changes this part.
         index = self.selected_index()
         if index is not None:
-            # TODO: change the selected part's colour
-            self.say(f"Part {index + 1} selected. Press Delete to remove it.")
+            part = self.drawing.parts[index]
+            self.fill_palette.show(part.fill)
+            self.outline_palette.show(part.outline)
+            self.say(f"Part {index + 1} selected. Pick a colour to change "
+                     "it, or press Delete to remove it.")
+        self.redraw()
+
+    def colour_picked(self, kind, colour):
+        # With no part selected, the colour is just used for new parts.
+        index = self.selected_index()
+        if index is None:
+            self.say(f"New parts will have a {colour} {kind}.")
+            return
+        self.drawing.recolour(index, kind, colour)
+        self.refresh_list(keep=index)
+        self.say(f"Part {index + 1} now has a {colour} {kind}.")
         self.redraw()
 
     def delete_part(self):
@@ -466,6 +530,17 @@ class ShapeMakerApp:
         self.refresh_list()
         self.say(f"Part {index + 1} was deleted.")
         self.redraw()
+
+    def clear_all(self):
+        if self.drawing.is_empty():
+            self.say("There is nothing to clear.", problem=True)
+            return
+        if messagebox.askyesno(APP_NAME, "Delete every part and start "
+                                         "again?"):
+            self.drawing.clear()
+            self.refresh_list()
+            self.say("Everything was cleared.")
+            self.redraw()
 
 
 def main():
