@@ -1,8 +1,9 @@
-"""Turtle Shape Maker - draw shapes for turtle."""
+"""Turtle Shape Maker: draw custom shapes for Python's turtle module."""
 
 import math
+import os
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Turtle Shape Maker"
 
@@ -17,6 +18,8 @@ CENTRE = CANVAS_SIZE // 2  # pixel position of (0, 0)
 
 # Drawing rules.
 MIN_POINTS = 3
+MAX_NAME_LENGTH = 20
+DEFAULT_NAME = "my_shape"
 
 # Colour names that tkinter and turtle both accept.
 COLOURS = ("black", "grey", "white", "brown", "red", "orange",
@@ -187,6 +190,61 @@ class Drawing:
         self.current = []
 
 
+# Names and files
+
+def check_shape_name(text):
+    """Return the name without outer spaces, or raise ShapeError."""
+    name = text.strip()
+    if not name:
+        raise ShapeError("Please give your shape a name.")
+    if len(name) > MAX_NAME_LENGTH:
+        raise ShapeError(f"The shape name can be up to {MAX_NAME_LENGTH} "
+                         "characters long.")
+    if not name[0].isalpha():
+        raise ShapeError("The shape name must start with a letter.")
+    for character in name:
+        # no quotes or backslashes, they would break the exported text
+        if not (character.isalnum() or character in " _"):
+            raise ShapeError("The shape name can only use letters, numbers, "
+                             "spaces and _.")
+    return name
+
+
+def suggested_file_name(name):
+    # "My Ship" becomes "my_ship".
+    return "_".join(name.lower().split())
+
+
+# Export
+# The export functions expect a name that has passed check_shape_name and
+# at least one part. The window checks both before calling them.
+
+def points_assignment(variable, points):
+    """Return a line like "part_1 = ((0, 10), (8, -6), (-8, -6))"."""
+    items = [str(point) for point in points]
+    return f"{variable} = ({', '.join(items)})"
+
+
+def make_text(name, parts):
+    # all comments or python so it can be pasted into a program
+    lines = [
+        f"# Turtle shape: {name}",
+        f"# Made with {APP_NAME}.",
+        "#",
+        "# Each part is a tuple of (x, y) points. To use one part as a shape:",
+        f'#     turtle.register_shape("{name}", part_1)',
+        '# To use several parts, join them with turtle.Shape("compound") and',
+        "# addcomponent().",
+        "",
+    ]
+    for number, part in enumerate(parts, start=1):
+        lines.append(f"# Part {number}: {part.fill}, with a {part.outline} "
+                     "outline")
+        lines.append(points_assignment(f"part_{number}", part.points))
+        lines.append("")
+    return "\n".join(lines)
+
+
 # Grid maths: grid points <-> canvas pixels
 
 def point_to_pixel(point):
@@ -262,6 +320,7 @@ class ShapeMakerApp:
     def __init__(self, root):
         self.root = root
         self.drawing = Drawing()
+        self.name = tk.StringVar(value=DEFAULT_NAME)
         self.message = tk.StringVar()
         self.mouse_position = tk.StringVar()
 
@@ -294,8 +353,11 @@ class ShapeMakerApp:
             row=1, column=1, sticky="e", pady=(10, 0))
 
     def build_panel(self, panel):
+        self.add_heading(panel, "Shape name", first=True)
+        ttk.Entry(panel, textvariable=self.name).pack(fill="x")
+
         # The lambdas tell colour_picked which palette was clicked.
-        self.add_heading(panel, "Fill colour", first=True)
+        self.add_heading(panel, "Fill colour")
         self.fill_palette = ColourPalette(
             panel, START_FILL,
             lambda colour: self.colour_picked("fill", colour))
@@ -323,6 +385,10 @@ class ShapeMakerApp:
         self.part_list.pack(side="left", fill="x", expand=True)
         self.add_button_row(panel, [("Delete", self.delete_part),
                                     ("Clear all", self.clear_all)])
+
+        self.add_heading(panel, "Export")
+        # TODO: export a .py program as well
+        self.add_button_row(panel, [("Export .txt", self.export_text)])
 
     def add_heading(self, panel, text, first=False):
         top_gap = 0 if first else 10
@@ -480,7 +546,8 @@ class ShapeMakerApp:
             self.say(str(problem), problem=True)
             return
         self.refresh_list()
-        self.say(f"Part {len(self.drawing.parts)} finished.")
+        self.say(f"Part {len(self.drawing.parts)} finished. Draw another "
+                 "part, or export your shape.")
         self.redraw()
 
     def undo_point(self):
@@ -541,6 +608,43 @@ class ShapeMakerApp:
             self.refresh_list()
             self.say("Everything was cleared.")
             self.redraw()
+
+    def export_text(self):
+        self.export_file(".txt", "Text file", make_text)
+
+    def export_file(self, extension, description, make):
+        """Ask for a file name and save make(name, parts) in it."""
+        if self.drawing.current:
+            self.say("Finish or cancel the part you are drawing first.",
+                     problem=True)
+            return
+        if not self.drawing.parts:
+            self.say("Draw at least one part first.", problem=True)
+            return
+        try:
+            name = check_shape_name(self.name.get())
+        except ShapeError as problem:
+            self.say(str(problem), problem=True)
+            return
+        self.name.set(name)  # show the name with outer spaces removed
+
+        path = filedialog.asksaveasfilename(
+            title=f"Export as {description.lower()}",
+            defaultextension=extension,
+            filetypes=[(description, "*" + extension)],
+            initialfile=suggested_file_name(name) + extension)
+        if not path:
+            return  # the user pressed Cancel
+
+        # saving can fail (no permission, disk full etc)
+        try:
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(make(name, self.drawing.parts))
+        except OSError as error:
+            messagebox.showerror(APP_NAME,
+                                 f"The file could not be saved.\n\n{error}")
+            return
+        self.say(f"Saved {os.path.basename(path)}.")
 
 
 def main():
