@@ -33,6 +33,10 @@ PALETTE_COLUMNS = 6
 
 HIGHLIGHT = "#1e90ff"  # unfinished part, selected part, mouse marker
 
+# Exported files.
+MAX_LINE_LENGTH = 79  # PEP 8 line limit
+INDENT = " " * 4
+
 
 # Drawing logic
 
@@ -222,7 +226,21 @@ def suggested_file_name(name):
 def points_assignment(variable, points):
     """Return a line like "part_1 = ((0, 10), (8, -6), (-8, -6))"."""
     items = [str(point) for point in points]
-    return f"{variable} = ({', '.join(items)})"
+    one_line = f"{variable} = ({', '.join(items)})"
+    if len(one_line) <= MAX_LINE_LENGTH:
+        return one_line
+
+    # too long, so wrap the points over several lines
+    lines = [f"{variable} = ("]
+    row = INDENT
+    for item in items:
+        if len(row) + len(item) + 1 > MAX_LINE_LENGTH:  # +1 for the comma
+            lines.append(row.rstrip())
+            row = INDENT
+        row += item + ", "
+    lines.append(row.rstrip())
+    lines.append(")")
+    return "\n".join(lines)
 
 
 def make_text(name, parts):
@@ -378,7 +396,10 @@ class ShapeMakerApp:
         # The list and its scrollbar share a frame so they sit side by side.
         list_frame = ttk.Frame(panel)
         list_frame.pack(fill="x")
-        self.part_list = tk.Listbox(list_frame, height=5, activestyle="none")
+        # exportselection=False keeps the selection when text elsewhere is
+        # selected, e.g. in the name box.
+        self.part_list = tk.Listbox(list_frame, height=5, activestyle="none",
+                                    exportselection=False)
         scrollbar = ttk.Scrollbar(list_frame, command=self.part_list.yview)
         self.part_list.config(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
@@ -432,7 +453,8 @@ class ShapeMakerApp:
 
     def bind_events(self):
         self.canvas.bind("<Button-1>", self.canvas_clicked)
-        # Right-click undoes a point.
+        # Right-click undoes a point. Macs call the right button Button-2.
+        self.canvas.bind("<Button-2>", lambda event: self.undo_point())
         self.canvas.bind("<Button-3>", lambda event: self.undo_point())
         self.canvas.bind("<Motion>", self.mouse_moved)
         self.canvas.bind("<Leave>", self.mouse_left)
