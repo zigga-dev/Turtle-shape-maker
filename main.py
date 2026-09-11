@@ -207,7 +207,8 @@ def check_shape_name(text):
     if not name[0].isalpha():
         raise ShapeError("The shape name must start with a letter.")
     for character in name:
-        # no quotes or backslashes, they would break the exported text
+        # Quotes and backslashes are never allowed, so the name is always
+        # safe to put inside a string in the exported program.
         if not (character.isalnum() or character in " _"):
             raise ShapeError("The shape name can only use letters, numbers, "
                              "spaces and _.")
@@ -252,7 +253,8 @@ def make_text(name, parts):
         "# Each part is a tuple of (x, y) points. To use one part as a shape:",
         f'#     turtle.register_shape("{name}", part_1)',
         '# To use several parts, join them with turtle.Shape("compound") and',
-        "# addcomponent().",
+        "# addcomponent(). The top of the drawing is the front of the shape,",
+        "# so use setheading(90) to show it the same way up as it was drawn.",
         "",
     ]
     for number, part in enumerate(parts, start=1):
@@ -260,6 +262,54 @@ def make_text(name, parts):
                      "outline")
         lines.append(points_assignment(f"part_{number}", part.points))
         lines.append("")
+    return "\n".join(lines)
+
+
+def make_python(name, parts):
+    # Builds the program line by line. The parts are joined into one
+    # compound shape, so each part keeps its colours.
+    lines = [
+        f'"""Starter program for the turtle shape "{name}".',
+        "",
+        f"Made with {APP_NAME}. Run this file to see the shape, then build",
+        "your own program or game from here.",
+        '"""',
+        "",
+        "import turtle",
+        "",
+        f'SHAPE_NAME = "{name}"',
+        "SIZE = 2  # how many times bigger than the drawing",
+        "",
+        "# The (x, y) points of each part. The top of the drawing is the",
+        "# front of the shape, which is the way the turtle moves.",
+    ]
+    for number, part in enumerate(parts, start=1):
+        lines.append(points_assignment(f"PART_{number}", part.points))
+
+    lines += ["", "", "def make_shape():"]
+    lines.append('    """Join the parts into one shape and register it."""')
+    lines.append('    shape = turtle.Shape("compound")')
+    for number, part in enumerate(parts, start=1):
+        lines.append(f'    shape.addcomponent(PART_{number}, '
+                     f'"{part.fill}", "{part.outline}")')
+    lines.append("    turtle.register_shape(SHAPE_NAME, shape)")
+
+    lines += [
+        "",
+        "",
+        "screen = turtle.Screen()",
+        "screen.title(SHAPE_NAME)",
+        "make_shape()",
+        "",
+        "player = turtle.Turtle()",
+        "player.shape(SHAPE_NAME)",
+        "player.shapesize(SIZE)",
+        "player.penup()",
+        "player.setheading(90)  # face up, so the shape looks as it was drawn",
+        "",
+        "turtle.done()",
+        "",
+    ]
     return "\n".join(lines)
 
 
@@ -408,8 +458,8 @@ class ShapeMakerApp:
                                     ("Clear all", self.clear_all)])
 
         self.add_heading(panel, "Export")
-        # TODO: export a .py program as well
-        self.add_button_row(panel, [("Export .txt", self.export_text)])
+        self.add_button_row(panel, [("Export .txt", self.export_text),
+                                    ("Export .py", self.export_python)])
 
     def add_heading(self, panel, text, first=False):
         top_gap = 0 if first else 10
@@ -443,6 +493,9 @@ class ShapeMakerApp:
                                     anchor="e", fill="#888888",
                                     font="TkSmallCaptionFont")
         self.draw_grid_lines(0, "#888888")
+        self.canvas.create_text(CENTRE, MARGIN - 4, anchor="s",
+                                text="front of the shape", fill="#888888",
+                                font="TkSmallCaptionFont")
 
     def draw_grid_lines(self, value, colour):
         # vertical and horizontal line
@@ -633,6 +686,9 @@ class ShapeMakerApp:
 
     def export_text(self):
         self.export_file(".txt", "Text file", make_text)
+
+    def export_python(self):
+        self.export_file(".py", "Python program", make_python)
 
     def export_file(self, extension, description, make):
         """Ask for a file name and save make(name, parts) in it."""
