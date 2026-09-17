@@ -266,19 +266,21 @@ def make_text(name, parts):
 
 
 def make_python(name, parts):
-    # Builds the program line by line. The parts are joined into one
-    # compound shape, so each part keeps its colours.
+    # Builds the program line by line. One part becomes a polygon shape;
+    # several parts become a compound shape where each keeps its colours.
     lines = [
         f'"""Starter program for the turtle shape "{name}".',
         "",
-        f"Made with {APP_NAME}. Run this file to see the shape, then build",
-        "your own program or game from here.",
+        f"Made with {APP_NAME}. Run this file to see the shape, then use",
+        "the arrow keys to move it. Build your own program or game from here.",
         '"""',
         "",
         "import turtle",
         "",
         f'SHAPE_NAME = "{name}"',
         "SIZE = 2  # how many times bigger than the drawing",
+        "STEP = 10  # how far the turtle moves per key press",
+        "TURN = 15  # how many degrees it turns per key press",
         "",
         "# The (x, y) points of each part. The top of the drawing is the",
         "# front of the shape, which is the way the turtle moves.",
@@ -287,14 +289,39 @@ def make_python(name, parts):
         lines.append(points_assignment(f"PART_{number}", part.points))
 
     lines += ["", "", "def make_shape():"]
-    lines.append('    """Join the parts into one shape and register it."""')
-    lines.append('    shape = turtle.Shape("compound")')
-    for number, part in enumerate(parts, start=1):
-        lines.append(f'    shape.addcomponent(PART_{number}, '
-                     f'"{part.fill}", "{part.outline}")')
-    lines.append("    turtle.register_shape(SHAPE_NAME, shape)")
+    if len(parts) == 1:
+        lines.append('    """Register the shape so turtles can use it."""')
+        lines.append("    turtle.register_shape(SHAPE_NAME, PART_1)")
+    else:
+        lines.append('    """Join the parts into one shape and register '
+                     'it."""')
+        lines.append('    shape = turtle.Shape("compound")')
+        for number, part in enumerate(parts, start=1):
+            lines.append(f'    shape.addcomponent(PART_{number}, '
+                         f'"{part.fill}", "{part.outline}")')
+        lines.append("    turtle.register_shape(SHAPE_NAME, shape)")
 
     lines += [
+        "",
+        "",
+        "def move_forward():",
+        '    """Move forward one step."""',
+        "    player.forward(STEP)",
+        "",
+        "",
+        "def move_back():",
+        '    """Move back one step."""',
+        "    player.backward(STEP)",
+        "",
+        "",
+        "def turn_left():",
+        '    """Turn to the left."""',
+        "    player.left(TURN)",
+        "",
+        "",
+        "def turn_right():",
+        '    """Turn to the right."""',
+        "    player.right(TURN)",
         "",
         "",
         "screen = turtle.Screen()",
@@ -303,9 +330,23 @@ def make_python(name, parts):
         "",
         "player = turtle.Turtle()",
         "player.shape(SHAPE_NAME)",
+    ]
+    if len(parts) == 1:
+        # A single polygon takes its colours from the turtle.
+        lines.append(f'player.color("{parts[0].outline}", '
+                     f'"{parts[0].fill}")  # outline, fill')
+    lines += [
         "player.shapesize(SIZE)",
         "player.penup()",
         "player.setheading(90)  # face up, so the shape looks as it was drawn",
+        "",
+        "# The arrow keys drive the turtle. Remove these if you don't need "
+        "them.",
+        'screen.onkey(move_forward, "Up")',
+        'screen.onkey(move_back, "Down")',
+        'screen.onkey(turn_left, "Left")',
+        'screen.onkey(turn_right, "Right")',
+        "screen.listen()",
         "",
         "turtle.done()",
         "",
