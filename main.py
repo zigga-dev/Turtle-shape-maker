@@ -1,5 +1,6 @@
 """Turtle Shape Maker: draw custom shapes for Python's turtle module."""
 
+import json
 import math
 import os
 import tkinter as tk
@@ -354,6 +355,15 @@ def make_python(name, parts):
     return "\n".join(lines)
 
 
+def make_drawing_file(name, parts):
+    # json writes the tuples of points as lists, e.g. [[0, 10], [8, -6]].
+    data = {"name": name, "parts": []}
+    for part in parts:
+        data["parts"].append({"fill": part.fill, "outline": part.outline,
+                              "points": part.points})
+    return json.dumps(data, indent=2)
+
+
 # Grid maths: grid points <-> canvas pixels
 
 def point_to_pixel(point):
@@ -501,6 +511,8 @@ class ShapeMakerApp:
         self.add_heading(panel, "Export")
         self.add_button_row(panel, [("Export .txt", self.export_text),
                                     ("Export .py", self.export_python)])
+        # TODO: Import drawing button
+        self.add_button_row(panel, [("Export drawing", self.export_drawing)])
 
     def add_heading(self, panel, text, first=False):
         top_gap = 0 if first else 10
@@ -730,6 +742,9 @@ class ShapeMakerApp:
 
     def export_python(self):
         self.export_file(".py", "Python program", make_python)
+
+    def export_drawing(self):
+        self.export_file(".json", "Drawing file", make_drawing_file)
 
     def export_file(self, extension, description, make):
         """Ask for a file name and save make(name, parts) in it."""
