@@ -221,7 +221,7 @@ def suggested_file_name(name):
     return "_".join(name.lower().split())
 
 
-# Export
+# Export and import
 # The export functions expect a name that has passed check_shape_name and
 # at least one part. The window checks both before calling them.
 
@@ -362,6 +362,50 @@ def make_drawing_file(name, parts):
         data["parts"].append({"fill": part.fill, "outline": part.outline,
                               "points": part.points})
     return json.dumps(data, indent=2)
+
+
+def read_drawing_file(text):
+    """Return (name, Drawing) from drawing file text, or raise ShapeError."""
+    try:
+        data = json.loads(text)
+        name = check_shape_name(data["name"])
+        if not data["parts"]:
+            raise ShapeError("The drawing file has no parts in it.")
+        # The parts are redrawn point by point, so a file has to follow the
+        # same rules as drawing by hand.
+        drawing = Drawing()
+        for number, part in enumerate(data["parts"], start=1):
+            add_part_from_file(drawing, number, part)
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        # bad JSON, missing keys or wrong types. ShapeError gets through.
+        raise ShapeError("That file is not a drawing from "
+                         f"{APP_NAME}.") from error
+    return name, drawing
+
+
+def add_part_from_file(drawing, number, part):
+    # part is a dictionary from the file. number is only for messages.
+    fill, outline, points = part["fill"], part["outline"], part["points"]
+    if fill not in COLOURS or outline not in COLOURS:
+        raise ShapeError(f"Part {number} in the file uses a colour that is "
+                         "not in the palettes.")
+    try:
+        # The number of points and the grid are checked here, before
+        # add_point, so the messages are about the file, not about clicking.
+        if len(points) < MIN_POINTS:
+            raise ShapeError(f"A part needs at least {MIN_POINTS} points.")
+        for x, y in points:
+            # type() so floats and True/False don't count as ints
+            if type(x) is not int or type(y) is not int:
+                raise ShapeError("Points must be whole numbers.")
+            if not in_grid((x, y)):
+                raise ShapeError(f"The point {(x, y)} is outside the grid.")
+            drawing.add_point((x, y))
+        drawing.finish_part(fill, outline)
+    except ShapeError as problem:
+        # Add the part number so the user knows which part is wrong.
+        raise ShapeError(f"Part {number} in the file has a problem: "
+                         f"{problem}") from problem
 
 
 # Grid maths: grid points <-> canvas pixels
@@ -508,11 +552,11 @@ class ShapeMakerApp:
         self.add_button_row(panel, [("Delete", self.delete_part),
                                     ("Clear all", self.clear_all)])
 
-        self.add_heading(panel, "Export")
+        self.add_heading(panel, "Import and export")
         self.add_button_row(panel, [("Export .txt", self.export_text),
                                     ("Export .py", self.export_python)])
-        # TODO: Import drawing button
-        self.add_button_row(panel, [("Export drawing", self.export_drawing)])
+        self.add_button_row(panel, [("Import drawing", self.import_drawing),
+                                    ("Export drawing", self.export_drawing)])
 
     def add_heading(self, panel, text, first=False):
         top_gap = 0 if first else 10
@@ -744,22 +788,27 @@ class ShapeMakerApp:
         self.export_file(".py", "Python program", make_python)
 
     def export_drawing(self):
-        self.export_file(".json", "Drawing file", make_drawing_file)
+        if self.export_file(".json", "Drawing file", make_drawing_file):
+            self.say(self.message.get() + " Use Import drawing to open it "
+                     "again.")
 
     def export_file(self, extension, description, make):
-        """Ask for a file name and save make(name, parts) in it."""
+        """Ask for a file name and save make(name, parts) in it.
+
+        Returns True if the file was saved.
+        """
         if self.drawing.current:
             self.say("Finish or cancel the part you are drawing first.",
                      problem=True)
-            return
+            return False
         if not self.drawing.parts:
             self.say("Draw at least one part first.", problem=True)
-            return
+            return False
         try:
             name = check_shape_name(self.name.get())
         except ShapeError as problem:
             self.say(str(problem), problem=True)
-            return
+            return False
         self.name.set(name)  # show the name with outer spaces removed
 
         path = filedialog.asksaveasfilename(
@@ -768,7 +817,7 @@ class ShapeMakerApp:
             filetypes=[(description, "*" + extension)],
             initialfile=suggested_file_name(name) + extension)
         if not path:
-            return  # the user pressed Cancel
+            return False  # the user pressed Cancel
 
         # saving can fail (no permission, disk full etc)
         try:
@@ -777,8 +826,40 @@ class ShapeMakerApp:
         except OSError as error:
             messagebox.showerror(APP_NAME,
                                  f"The file could not be saved.\n\n{error}")
-            return
+            return False
         self.say(f"Saved {os.path.basename(path)}.")
+        return True
+
+    def import_drawing(self):
+        path = filedialog.askopenfilename(
+            title="Import a drawing",
+            filetypes=[("Drawing file", "*.json")])
+        if not path:
+            return  # the user pressed Cancel
+
+        # The file is read and checked before anything changes, so a bad
+        # file leaves the current drawing untouched.
+        try:
+            # utf-8-sig copes with the BOM that Notepad adds
+            with open(path, encoding="utf-8-sig") as file:
+                name, drawing = read_drawing_file(file.read())
+        except (OSError, UnicodeDecodeError) as error:
+            # The file is missing, locked, or not a text file.
+            messagebox.showerror(APP_NAME,
+                                 f"The file could not be opened.\n\n{error}")
+            return
+        except ShapeError as problem:
+            messagebox.showerror(APP_NAME, str(problem))
+            return
+
+        if not self.drawing.is_empty() and not messagebox.askyesno(
+                APP_NAME, "Replace your current drawing with this one?"):
+            return
+        self.drawing = drawing
+        self.name.set(name)
+        self.refresh_list()
+        self.say(f"Imported {os.path.basename(path)}.")
+        self.redraw()
 
 
 def main():
