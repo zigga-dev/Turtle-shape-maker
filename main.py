@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -19,6 +20,8 @@ CENTRE = CANVAS_SIZE // 2  # pixel position of (0, 0)
 
 # Drawing rules.
 MIN_POINTS = 3
+MAX_POINTS = 40
+MAX_PARTS = 12
 MAX_NAME_LENGTH = 20
 DEFAULT_NAME = "my_shape"
 
@@ -37,6 +40,10 @@ HIGHLIGHT = "#1e90ff"  # unfinished part, selected part, mouse marker
 # Exported files.
 MAX_LINE_LENGTH = 79  # PEP 8 line limit
 INDENT = " " * 4
+# A program saved with the name of one of Python's own modules, such as
+# turtle.py or random.py, would be imported instead of the real module, so
+# it would not run. sys.stdlib_module_names needs Python 3.10 or newer.
+BLOCKED_FILE_NAMES = sys.stdlib_module_names
 
 
 # Drawing logic
@@ -119,6 +126,13 @@ class Drawing:
     def add_point(self, point):
         if not in_grid(point):
             raise ShapeError("Click inside the grid.")
+        # Starting a new part when there are already MAX_PARTS.
+        if not self.current and len(self.parts) >= MAX_PARTS:
+            raise ShapeError(f"A shape can have up to {MAX_PARTS} parts. "
+                             "Delete one to start another.")
+        if len(self.current) >= MAX_POINTS:
+            raise ShapeError(f"A part can have up to {MAX_POINTS} points. "
+                             "Finish this part first.")
         if point in self.current:
             raise ShapeError("That point is already in this part.")
 
@@ -217,8 +231,19 @@ def check_shape_name(text):
 
 
 def suggested_file_name(name):
-    # "My Ship" becomes "my_ship".
-    return "_".join(name.lower().split())
+    # "My Ship" becomes "my_ship". Blocked names get "_shape" added.
+    stem = "_".join(name.lower().split())
+    if stem in BLOCKED_FILE_NAMES:
+        stem += "_shape"
+    return stem
+
+
+def blocked_module(path):
+    # Returns the module name if path is a blocked .py file, else None.
+    stem, extension = os.path.splitext(os.path.basename(path))
+    if extension.lower() == ".py" and stem.lower() in BLOCKED_FILE_NAMES:
+        return stem.lower()
+    return None
 
 
 # Export and import
@@ -371,6 +396,9 @@ def read_drawing_file(text):
         name = check_shape_name(data["name"])
         if not data["parts"]:
             raise ShapeError("The drawing file has no parts in it.")
+        if len(data["parts"]) > MAX_PARTS:
+            raise ShapeError(f"The drawing file has more than {MAX_PARTS} "
+                             "parts.")
         # The parts are redrawn point by point, so a file has to follow the
         # same rules as drawing by hand.
         drawing = Drawing()
@@ -392,8 +420,9 @@ def add_part_from_file(drawing, number, part):
     try:
         # The number of points and the grid are checked here, before
         # add_point, so the messages are about the file, not about clicking.
-        if len(points) < MIN_POINTS:
-            raise ShapeError(f"A part needs at least {MIN_POINTS} points.")
+        if not MIN_POINTS <= len(points) <= MAX_POINTS:
+            raise ShapeError(f"A part needs {MIN_POINTS} to {MAX_POINTS} "
+                             "points.")
         for x, y in points:
             # type() so floats and True/False don't count as ints
             if type(x) is not int or type(y) is not int:
@@ -818,6 +847,14 @@ class ShapeMakerApp:
             initialfile=suggested_file_name(name) + extension)
         if not path:
             return False  # the user pressed Cancel
+
+        module = blocked_module(path)
+        if module:
+            messagebox.showwarning(
+                APP_NAME,
+                f"Please choose another name. A program called {module}.py "
+                f"stops Python from finding its own {module} module.")
+            return False
 
         # saving can fail (no permission, disk full etc)
         try:
