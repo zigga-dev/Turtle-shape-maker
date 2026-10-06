@@ -35,7 +35,17 @@ SWATCH_GAP = 6
 SWATCH_STEP = SWATCH + SWATCH_GAP  # distance from one square to the next
 PALETTE_COLUMNS = 6
 
+# Window appearance.
+CANVAS_BACKGROUND = "white"
+MINOR_LINE = "#ececec"
+MAJOR_LINE = "#cccccc"
+AXIS_LINE = "#888888"
+QUIET_TEXT = "#888888"  # axis numbers
+SWATCH_EDGE = "#999999"
 HIGHLIGHT = "#1e90ff"  # unfinished part, selected part, mouse marker
+PROBLEM_TEXT = "#c0392b"  # error messages
+SMALL_FONT = "TkSmallCaptionFont"
+HEADING_FONT = "TkHeadingFont"
 
 # Exported files.
 MAX_LINE_LENGTH = 79  # PEP 8 line limit
@@ -488,7 +498,7 @@ class ColourPalette:
             x = column * SWATCH_STEP + offset
             y = row * SWATCH_STEP + offset
             self.canvas.create_rectangle(x, y, x + SWATCH, y + SWATCH,
-                                         fill=colour, outline="#999999")
+                                         fill=colour, outline=SWATCH_EDGE)
             if colour == self.chosen:
                 # A ring in the gap around the chosen square.
                 ring = offset - 1
@@ -529,8 +539,8 @@ class ShapeMakerApp:
         frame.pack()
 
         self.canvas = tk.Canvas(frame, width=CANVAS_SIZE, height=CANVAS_SIZE,
-                                background="white", highlightthickness=0,
-                                cursor="crosshair")
+                                background=CANVAS_BACKGROUND,
+                                highlightthickness=0, cursor="crosshair")
         self.canvas.grid(row=0, column=0, sticky="n")
 
         panel = ttk.Frame(frame, padding=(12, 0, 0, 0))
@@ -589,7 +599,7 @@ class ShapeMakerApp:
 
     def add_heading(self, panel, text, first=False):
         top_gap = 0 if first else 10
-        ttk.Label(panel, text=text, font="TkHeadingFont").pack(
+        ttk.Label(panel, text=text, font=HEADING_FONT).pack(
             anchor="w", pady=(top_gap, 3))
 
     def add_button_row(self, panel, buttons):
@@ -607,21 +617,21 @@ class ShapeMakerApp:
         # light lines first so the darker ones end up on top
         for value in range(-GRID_RANGE, GRID_RANGE + 1):
             if value % 5 != 0:
-                self.draw_grid_lines(value, "#ececec")
+                self.draw_grid_lines(value, MINOR_LINE)
         for value in range(-GRID_RANGE, GRID_RANGE + 1, 5):
-            self.draw_grid_lines(value, "#cccccc")
+            self.draw_grid_lines(value, MAJOR_LINE)
             # Numbers along the bottom (x) and the left side (y).
             x, y = point_to_pixel((value, value))
             self.canvas.create_text(x, CANVAS_SIZE - MARGIN + 4,
                                     text=str(value), anchor="n",
-                                    fill="#888888", font="TkSmallCaptionFont")
+                                    fill=QUIET_TEXT, font=SMALL_FONT)
             self.canvas.create_text(MARGIN - 4, y, text=str(value),
-                                    anchor="e", fill="#888888",
-                                    font="TkSmallCaptionFont")
-        self.draw_grid_lines(0, "#888888")
+                                    anchor="e", fill=QUIET_TEXT,
+                                    font=SMALL_FONT)
+        self.draw_grid_lines(0, AXIS_LINE)
         self.canvas.create_text(CENTRE, MARGIN - 4, anchor="s",
-                                text="front of the shape", fill="#888888",
-                                font="TkSmallCaptionFont")
+                                text="front of the shape", fill=QUIET_TEXT,
+                                font=SMALL_FONT)
 
     def draw_grid_lines(self, value, colour):
         # vertical and horizontal line
@@ -647,7 +657,7 @@ class ShapeMakerApp:
         # red for problems, "" = normal colour
         self.message.set(text)
         if problem:
-            self.message_label.config(foreground="#c0392b")
+            self.message_label.config(foreground=PROBLEM_TEXT)
         else:
             self.message_label.config(foreground="")
 
@@ -697,7 +707,7 @@ class ShapeMakerApp:
         for index, point in enumerate(points):
             x, y = point_to_pixel(point)
             if index == 0:
-                radius, fill = 6, "white"
+                radius, fill = 6, CANVAS_BACKGROUND
             else:
                 radius, fill = 3, HIGHLIGHT
             self.canvas.create_oval(x - radius, y - radius,
