@@ -11,12 +11,15 @@ APP_NAME = "Turtle Shape Maker"
 
 # Settings
 
-# grid goes from -GRID_RANGE to GRID_RANGE
+# Points can go from -GRID_RANGE to GRID_RANGE on each axis.
 GRID_RANGE = 20
 CELL = 12  # pixels between grid points
 MARGIN = 28  # pixels around the grid for the axis numbers
+NUMBER_EVERY = 5  # every 5th grid line is darker and numbered
 CANVAS_SIZE = 2 * (MARGIN + GRID_RANGE * CELL)
 CENTRE = CANVAS_SIZE // 2  # pixel position of (0, 0)
+GRID_LOW = MARGIN  # pixel position of the grid's top and left edges
+GRID_HIGH = CANVAS_SIZE - MARGIN  # pixel position of its bottom and right
 
 # Drawing rules.
 MIN_POINTS = 3
@@ -30,10 +33,6 @@ COLOURS = ("black", "grey", "white", "brown", "red", "orange",
            "yellow", "green", "cyan", "blue", "purple", "pink")
 START_FILL = "green"
 START_OUTLINE = "black"
-SWATCH = 20  # colour square size
-SWATCH_GAP = 6
-SWATCH_STEP = SWATCH + SWATCH_GAP  # distance from one square to the next
-PALETTE_COLUMNS = 6
 
 # Window appearance.
 CANVAS_BACKGROUND = "white"
@@ -46,6 +45,22 @@ HIGHLIGHT = "#1e90ff"  # unfinished part, selected part, mouse marker
 PROBLEM_TEXT = "#c0392b"  # error messages
 SMALL_FONT = "TkSmallCaptionFont"
 HEADING_FONT = "TkHeadingFont"
+LINE_WIDTH = 2
+DOT_RADIUS = 3
+START_RADIUS = 6  # bigger, so the first point is easy to click again
+MARKER_RADIUS = 5
+SELECTED_DASH = (5, 3)  # 5 pixels of line, then a 3 pixel gap
+LABEL_GAP = 4  # gap between the grid and its numbers
+SWATCH = 20  # colour square size
+SWATCH_GAP = 6
+SWATCH_STEP = SWATCH + SWATCH_GAP  # distance from one square to the next
+PALETTE_COLUMNS = 6
+PAD = 12  # window padding
+GAP = 10  # between groups of controls
+SMALL_GAP = 3
+LIST_ROWS = 5
+SHAPES_TAG = "shapes"  # tag for canvas items redrawn on every change
+MARKER_TAG = "marker"  # tag for the ring that follows the mouse
 
 # Exported files.
 MAX_LINE_LENGTH = 79  # PEP 8 line limit
@@ -54,6 +69,9 @@ INDENT = " " * 4
 # turtle.py or random.py, would be imported instead of the real module, so
 # it would not run. sys.stdlib_module_names needs Python 3.10 or newer.
 BLOCKED_FILE_NAMES = sys.stdlib_module_names
+EXPORT_SIZE = 2  # exported shape is twice the drawing size
+EXPORT_STEP = 10  # pixels moved per key press
+EXPORT_TURN = 15  # degrees turned per key press
 
 
 # Drawing logic
@@ -314,9 +332,9 @@ def make_python(name, parts):
         "import turtle",
         "",
         f'SHAPE_NAME = "{name}"',
-        "SIZE = 2  # how many times bigger than the drawing",
-        "STEP = 10  # how far the turtle moves per key press",
-        "TURN = 15  # how many degrees it turns per key press",
+        f"SIZE = {EXPORT_SIZE}  # how many times bigger than the drawing",
+        f"STEP = {EXPORT_STEP}  # how far the turtle moves per key press",
+        f"TURN = {EXPORT_TURN}  # how many degrees it turns per key press",
         "",
         "# The (x, y) points of each part. The top of the drawing is the",
         "# front of the shape, which is the way the turtle moves.",
@@ -504,7 +522,7 @@ class ColourPalette:
                 ring = offset - 1
                 self.canvas.create_rectangle(
                     x - ring, y - ring, x + SWATCH + ring, y + SWATCH + ring,
-                    outline=HIGHLIGHT, width=2)
+                    outline=HIGHLIGHT, width=LINE_WIDTH)
 
     def clicked(self, event):
         # which square was clicked?
@@ -535,7 +553,7 @@ class ShapeMakerApp:
         self.say("Click a grid point to start drawing a part.")
 
     def build_window(self):
-        frame = ttk.Frame(self.root, padding=12)
+        frame = ttk.Frame(self.root, padding=PAD)
         frame.pack()
 
         self.canvas = tk.Canvas(frame, width=CANVAS_SIZE, height=CANVAS_SIZE,
@@ -543,16 +561,16 @@ class ShapeMakerApp:
                                 highlightthickness=0, cursor="crosshair")
         self.canvas.grid(row=0, column=0, sticky="n")
 
-        panel = ttk.Frame(frame, padding=(12, 0, 0, 0))
+        panel = ttk.Frame(frame, padding=(PAD, 0, 0, 0))
         panel.grid(row=0, column=1, sticky="n")
         self.build_panel(panel)
 
         # wraplength makes long messages wrap instead of widening the window.
         self.message_label = ttk.Label(frame, textvariable=self.message,
                                        wraplength=CANVAS_SIZE)
-        self.message_label.grid(row=1, column=0, sticky="w", pady=(10, 0))
+        self.message_label.grid(row=1, column=0, sticky="w", pady=(GAP, 0))
         ttk.Label(frame, textvariable=self.mouse_position).grid(
-            row=1, column=1, sticky="e", pady=(10, 0))
+            row=1, column=1, sticky="e", pady=(GAP, 0))
 
     def build_panel(self, panel):
         self.add_heading(panel, "Shape name", first=True)
@@ -582,8 +600,8 @@ class ShapeMakerApp:
         list_frame.pack(fill="x")
         # exportselection=False keeps the selection when text elsewhere is
         # selected, e.g. in the name box.
-        self.part_list = tk.Listbox(list_frame, height=5, activestyle="none",
-                                    exportselection=False)
+        self.part_list = tk.Listbox(list_frame, height=LIST_ROWS,
+                                    activestyle="none", exportselection=False)
         scrollbar = ttk.Scrollbar(list_frame, command=self.part_list.yview)
         self.part_list.config(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
@@ -598,47 +616,46 @@ class ShapeMakerApp:
                                     ("Export drawing", self.export_drawing)])
 
     def add_heading(self, panel, text, first=False):
-        top_gap = 0 if first else 10
+        top_gap = 0 if first else GAP
         ttk.Label(panel, text=text, font=HEADING_FONT).pack(
-            anchor="w", pady=(top_gap, 3))
+            anchor="w", pady=(top_gap, SMALL_GAP))
 
     def add_button_row(self, panel, buttons):
         # buttons is a list of (text, command) pairs.
         row = ttk.Frame(panel)
-        row.pack(fill="x", pady=(3, 0))
+        row.pack(fill="x", pady=(SMALL_GAP, 0))
         for column, (text, command) in enumerate(buttons):
             # uniform makes the buttons the same width
             row.columnconfigure(column, weight=1, uniform="buttons")
-            left_gap = 0 if column == 0 else 3
+            left_gap = 0 if column == 0 else SMALL_GAP
             ttk.Button(row, text=text, command=command).grid(
                 row=0, column=column, sticky="ew", padx=(left_gap, 0))
 
     def draw_grid(self):
         # light lines first so the darker ones end up on top
         for value in range(-GRID_RANGE, GRID_RANGE + 1):
-            if value % 5 != 0:
+            if value % NUMBER_EVERY != 0:
                 self.draw_grid_lines(value, MINOR_LINE)
-        for value in range(-GRID_RANGE, GRID_RANGE + 1, 5):
+        for value in range(-GRID_RANGE, GRID_RANGE + 1, NUMBER_EVERY):
             self.draw_grid_lines(value, MAJOR_LINE)
             # Numbers along the bottom (x) and the left side (y).
             x, y = point_to_pixel((value, value))
-            self.canvas.create_text(x, CANVAS_SIZE - MARGIN + 4,
-                                    text=str(value), anchor="n",
-                                    fill=QUIET_TEXT, font=SMALL_FONT)
-            self.canvas.create_text(MARGIN - 4, y, text=str(value),
+            self.canvas.create_text(x, GRID_HIGH + LABEL_GAP, text=str(value),
+                                    anchor="n", fill=QUIET_TEXT,
+                                    font=SMALL_FONT)
+            self.canvas.create_text(GRID_LOW - LABEL_GAP, y, text=str(value),
                                     anchor="e", fill=QUIET_TEXT,
                                     font=SMALL_FONT)
         self.draw_grid_lines(0, AXIS_LINE)
-        self.canvas.create_text(CENTRE, MARGIN - 4, anchor="s",
+        self.canvas.create_text(CENTRE, GRID_LOW - LABEL_GAP, anchor="s",
                                 text="front of the shape", fill=QUIET_TEXT,
                                 font=SMALL_FONT)
 
     def draw_grid_lines(self, value, colour):
         # vertical and horizontal line
         x, y = point_to_pixel((value, value))
-        far = CANVAS_SIZE - MARGIN
-        self.canvas.create_line(x, MARGIN, x, far, fill=colour)
-        self.canvas.create_line(MARGIN, y, far, y, fill=colour)
+        self.canvas.create_line(x, GRID_LOW, x, GRID_HIGH, fill=colour)
+        self.canvas.create_line(GRID_LOW, y, GRID_HIGH, y, fill=colour)
 
     def bind_events(self):
         self.canvas.bind("<Button-1>", self.canvas_clicked)
@@ -681,39 +698,40 @@ class ShapeMakerApp:
             self.part_list.see(keep)
 
     def redraw(self):
-        # only delete "shapes" so the grid stays
-        self.canvas.delete("shapes")
+        # Only items tagged SHAPES_TAG are deleted, so the grid stays.
+        self.canvas.delete(SHAPES_TAG)
         for part in self.drawing.parts:
             self.canvas.create_polygon(to_pixels(part.points),
                                        fill=part.fill, outline=part.outline,
-                                       width=2, tags="shapes")
+                                       width=LINE_WIDTH, tags=SHAPES_TAG)
 
         # dashed outline on top for the selected part
         index = self.selected_index()
         if index is not None:
             self.canvas.create_polygon(
                 to_pixels(self.drawing.parts[index].points), fill="",
-                outline=HIGHLIGHT, width=2, dash=(5, 3), tags="shapes")
+                outline=HIGHLIGHT, width=LINE_WIDTH, dash=SELECTED_DASH,
+                tags=SHAPES_TAG)
 
         self.draw_unfinished_part()
-        self.canvas.tag_raise("marker")  # keep the mouse ring on top
+        self.canvas.tag_raise(MARKER_TAG)  # keep the mouse ring on top
 
     def draw_unfinished_part(self):
         points = self.drawing.current
         if len(points) >= 2:
             self.canvas.create_line(to_pixels(points), fill=HIGHLIGHT,
-                                    width=2, tags="shapes")
+                                    width=LINE_WIDTH, tags=SHAPES_TAG)
         # first point is bigger and hollow so you can click it again
         for index, point in enumerate(points):
             x, y = point_to_pixel(point)
             if index == 0:
-                radius, fill = 6, CANVAS_BACKGROUND
+                radius, fill = START_RADIUS, CANVAS_BACKGROUND
             else:
-                radius, fill = 3, HIGHLIGHT
+                radius, fill = DOT_RADIUS, HIGHLIGHT
             self.canvas.create_oval(x - radius, y - radius,
                                     x + radius, y + radius, fill=fill,
-                                    outline=HIGHLIGHT, width=2,
-                                    tags="shapes")
+                                    outline=HIGHLIGHT, width=LINE_WIDTH,
+                                    tags=SHAPES_TAG)
 
     def canvas_clicked(self, event):
         point = pixel_to_point(event.x, event.y)
@@ -735,18 +753,20 @@ class ShapeMakerApp:
 
     def mouse_moved(self, event):
         # ring on the nearest grid point, and show the coords
-        self.canvas.delete("marker")
+        self.canvas.delete(MARKER_TAG)
         point = pixel_to_point(event.x, event.y)
         if not in_grid(point):
             self.mouse_position.set("")
             return
         x, y = point_to_pixel(point)
-        self.canvas.create_oval(x - 5, y - 5, x + 5, y + 5,
-                                outline=HIGHLIGHT, width=2, tags="marker")
+        self.canvas.create_oval(x - MARKER_RADIUS, y - MARKER_RADIUS,
+                                x + MARKER_RADIUS, y + MARKER_RADIUS,
+                                outline=HIGHLIGHT, width=LINE_WIDTH,
+                                tags=MARKER_TAG)
         self.mouse_position.set(f"x {point[0]}, y {point[1]}")
 
     def mouse_left(self, event):
-        self.canvas.delete("marker")
+        self.canvas.delete(MARKER_TAG)
         self.mouse_position.set("")
 
     def finish_part(self):
