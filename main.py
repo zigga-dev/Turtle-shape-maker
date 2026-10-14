@@ -39,7 +39,7 @@ CANVAS_BACKGROUND = "white"
 MINOR_LINE = "#ececec"
 MAJOR_LINE = "#cccccc"
 AXIS_LINE = "#888888"
-QUIET_TEXT = "#888888"  # axis numbers
+QUIET_TEXT = "#888888"  # axis numbers and help text
 SWATCH_EDGE = "#999999"
 HIGHLIGHT = "#1e90ff"  # unfinished part, selected part, mouse marker
 PROBLEM_TEXT = "#c0392b"  # error messages
@@ -61,6 +61,8 @@ SMALL_GAP = 3
 LIST_ROWS = 5
 SHAPES_TAG = "shapes"  # tag for canvas items redrawn on every change
 MARKER_TAG = "marker"  # tag for the ring that follows the mouse
+HELP_TEXT = ("Click the first point again, or press Enter, to finish a "
+             "part. Right-click to undo a point.")
 
 # Exported files.
 MAX_LINE_LENGTH = 79  # PEP 8 line limit
@@ -74,10 +76,10 @@ EXPORT_STEP = 10  # pixels moved per key press
 EXPORT_TURN = 15  # degrees turned per key press
 
 
-# Drawing logic
+# The drawing (just the shape rules, no tkinter)
 
 class ShapeError(Exception):
-    """Error with a message to show the user."""
+    """Raised when an action breaks a rule. The message is for the user."""
 
 
 class Part:
@@ -111,12 +113,13 @@ def on_segment(p, a, b):
 
 def segments_meet(a, b, c, d):
     """Return True if segment a-b crosses or touches segment c-d."""
-    # proper cross: a, b on opposite sides of c-d and c, d on
-    # opposite sides of a-b
+    # They cross if a and b are on opposite sides of c-d (the cross
+    # products have opposite signs, so they multiply to a negative), and
+    # c and d are on opposite sides of a-b.
     if (cross(c, d, a) * cross(c, d, b) < 0
             and cross(a, b, c) * cross(a, b, d) < 0):
         return True
-    # touching: an end point lies on the other segment
+    # They touch if an end of one segment lies on the other.
     return (on_segment(a, c, d) or on_segment(b, c, d)
             or on_segment(c, a, b) or on_segment(d, a, b))
 
@@ -124,7 +127,8 @@ def segments_meet(a, b, c, d):
 def turns_back(a, b, c):
     """Return True if a -> b -> c goes back along line a-b."""
     (ax, ay), (bx, by), (cx, cy) = a, b, c
-    # dot product > 0 means c is on the same side of b as a
+    # A positive dot product of b->a and b->c means c is on the same side
+    # of b as a. Together with cross == 0 (in a line), c is back on a-b.
     same_side = (ax - bx) * (cx - bx) + (ay - by) * (cy - by) > 0
     return cross(a, b, c) == 0 and same_side
 
@@ -171,7 +175,8 @@ class Drawing:
             if turns_back(self.current[-2], last, point):
                 raise ShapeError("That line would go back over the last "
                                  "one.")
-            # skip the newest line, it always touches the new one
+            # The newest line is skipped because it always meets the new
+            # line at the last point.
             for i in range(len(self.current) - 2):
                 if segments_meet(self.current[i], self.current[i + 1],
                                  last, point):
@@ -285,7 +290,8 @@ def points_assignment(variable, points):
     if len(one_line) <= MAX_LINE_LENGTH:
         return one_line
 
-    # too long, so wrap the points over several lines
+    # Too long for one line: put as many points as fit on each line inside
+    # the brackets. Python allows line breaks inside brackets.
     lines = [f"{variable} = ("]
     row = INDENT
     for item in items:
@@ -299,7 +305,8 @@ def points_assignment(variable, points):
 
 
 def make_text(name, parts):
-    # all comments or python so it can be pasted into a program
+    # Every line is a comment or Python, so any of it can be pasted
+    # straight into a program.
     lines = [
         f"# Turtle shape: {name}",
         f"# Made with {APP_NAME}.",
@@ -433,7 +440,9 @@ def read_drawing_file(text):
         for number, part in enumerate(data["parts"], start=1):
             add_part_from_file(drawing, number, part)
     except (ValueError, KeyError, TypeError, AttributeError) as error:
-        # bad JSON, missing keys or wrong types. ShapeError gets through.
+        # ValueError: not JSON. KeyError: a value is missing. TypeError and
+        # AttributeError: a value is the wrong type, e.g. a number for the
+        # name. ShapeError is not caught, so rule messages get through.
         raise ShapeError("That file is not a drawing from "
                          f"{APP_NAME}.") from error
     return name, drawing
@@ -452,7 +461,8 @@ def add_part_from_file(drawing, number, part):
             raise ShapeError(f"A part needs {MIN_POINTS} to {MAX_POINTS} "
                              "points.")
         for x, y in points:
-            # type() so floats and True/False don't count as ints
+            # Must be exactly int: decimals are not grid points, and
+            # True/False count as ints in Python, so they are checked too.
             if type(x) is not int or type(y) is not int:
                 raise ShapeError("Points must be whole numbers.")
             if not in_grid((x, y)):
@@ -469,12 +479,13 @@ def add_part_from_file(drawing, number, part):
 
 def point_to_pixel(point):
     x, y = point
-    # canvas y goes down but turtle y goes up, so flip it
+    # Canvas y counts down from the top, but turtle y counts up, so y is
+    # subtracted from the centre instead of added.
     return CENTRE + x * CELL, CENTRE - y * CELL
 
 
 def pixel_to_point(px, py):
-    # reverse of point_to_pixel, rounded to nearest grid point
+    # The reverse of point_to_pixel, rounded to the nearest grid point.
     return round((px - CENTRE) / CELL), round((CENTRE - py) / CELL)
 
 
@@ -511,7 +522,7 @@ class ColourPalette:
         self.canvas.delete("all")
         offset = SWATCH_GAP // 2  # half a gap around each square
         for index, colour in enumerate(COLOURS):
-            # row and column of this square
+            # divmod gives the row and column, e.g. index 7 -> row 1, col 1.
             row, column = divmod(index, PALETTE_COLUMNS)
             x = column * SWATCH_STEP + offset
             y = row * SWATCH_STEP + offset
@@ -525,7 +536,7 @@ class ColourPalette:
                     outline=HIGHLIGHT, width=LINE_WIDTH)
 
     def clicked(self, event):
-        # which square was clicked?
+        # Work out which square was clicked from the mouse position.
         column = event.x // SWATCH_STEP
         row = event.y // SWATCH_STEP
         index = row * PALETTE_COLUMNS + column
@@ -552,6 +563,8 @@ class ShapeMakerApp:
         self.bind_events()
         self.say("Click a grid point to start drawing a part.")
 
+    # Building the window
+
     def build_window(self):
         frame = ttk.Frame(self.root, padding=PAD)
         frame.pack()
@@ -561,16 +574,21 @@ class ShapeMakerApp:
                                 highlightthickness=0, cursor="crosshair")
         self.canvas.grid(row=0, column=0, sticky="n")
 
+        # The panel spans two rows so the help text can sit under the grid.
         panel = ttk.Frame(frame, padding=(PAD, 0, 0, 0))
-        panel.grid(row=0, column=1, sticky="n")
+        panel.grid(row=0, column=1, rowspan=2, sticky="n")
         self.build_panel(panel)
+
+        ttk.Label(frame, text=HELP_TEXT, foreground=QUIET_TEXT,
+                  wraplength=CANVAS_SIZE).grid(row=1, column=0, sticky="nw",
+                                               pady=(SMALL_GAP, 0))
 
         # wraplength makes long messages wrap instead of widening the window.
         self.message_label = ttk.Label(frame, textvariable=self.message,
                                        wraplength=CANVAS_SIZE)
-        self.message_label.grid(row=1, column=0, sticky="w", pady=(GAP, 0))
+        self.message_label.grid(row=2, column=0, sticky="w", pady=(GAP, 0))
         ttk.Label(frame, textvariable=self.mouse_position).grid(
-            row=1, column=1, sticky="e", pady=(GAP, 0))
+            row=2, column=1, sticky="e", pady=(GAP, 0))
 
     def build_panel(self, panel):
         self.add_heading(panel, "Shape name", first=True)
@@ -625,14 +643,15 @@ class ShapeMakerApp:
         row = ttk.Frame(panel)
         row.pack(fill="x", pady=(SMALL_GAP, 0))
         for column, (text, command) in enumerate(buttons):
-            # uniform makes the buttons the same width
+            # Columns in the same "uniform" group are always equal widths.
             row.columnconfigure(column, weight=1, uniform="buttons")
             left_gap = 0 if column == 0 else SMALL_GAP
             ttk.Button(row, text=text, command=command).grid(
                 row=0, column=column, sticky="ew", padx=(left_gap, 0))
 
     def draw_grid(self):
-        # light lines first so the darker ones end up on top
+        # Light lines first, then darker numbered lines, then the axes, so
+        # the darker lines are on top where they cross.
         for value in range(-GRID_RANGE, GRID_RANGE + 1):
             if value % NUMBER_EVERY != 0:
                 self.draw_grid_lines(value, MINOR_LINE)
@@ -652,7 +671,7 @@ class ShapeMakerApp:
                                 font=SMALL_FONT)
 
     def draw_grid_lines(self, value, colour):
-        # vertical and horizontal line
+        # The vertical line x = value and the horizontal line y = value.
         x, y = point_to_pixel((value, value))
         self.canvas.create_line(x, GRID_LOW, x, GRID_HIGH, fill=colour)
         self.canvas.create_line(GRID_LOW, y, GRID_HIGH, y, fill=colour)
@@ -670,8 +689,10 @@ class ShapeMakerApp:
         self.root.bind("<Return>", lambda event: self.finish_part())
         self.root.bind("<Escape>", lambda event: self.cancel_part())
 
+    # Showing the drawing
+
     def say(self, text, problem=False):
-        # red for problems, "" = normal colour
+        # Problems are shown in red. "" puts the colour back to normal.
         self.message.set(text)
         if problem:
             self.message_label.config(foreground=PROBLEM_TEXT)
@@ -679,7 +700,8 @@ class ShapeMakerApp:
             self.message_label.config(foreground="")
 
     def selected_index(self):
-        # curselection() is a tuple, empty if nothing is selected
+        # curselection() gives a tuple like (2,), or () if nothing is
+        # selected.
         selection = self.part_list.curselection()
         if selection:
             return selection[0]
@@ -692,7 +714,9 @@ class ShapeMakerApp:
             self.part_list.insert(
                 tk.END, f"{number}. {part.fill} ({len(part.points)} points)")
         if keep is not None:
-            # rebuilding loses the scroll and active row, so put them back
+            # Rebuilding the list scrolls it back to the top and makes row 0
+            # the active row (where the arrow keys start from), so both are
+            # moved back to the kept row.
             self.part_list.selection_set(keep)
             self.part_list.activate(keep)
             self.part_list.see(keep)
@@ -705,7 +729,8 @@ class ShapeMakerApp:
                                        fill=part.fill, outline=part.outline,
                                        width=LINE_WIDTH, tags=SHAPES_TAG)
 
-        # dashed outline on top for the selected part
+        # A dashed outline drawn last marks the selected part, even if other
+        # parts cover it.
         index = self.selected_index()
         if index is not None:
             self.canvas.create_polygon(
@@ -721,7 +746,8 @@ class ShapeMakerApp:
         if len(points) >= 2:
             self.canvas.create_line(to_pixels(points), fill=HIGHLIGHT,
                                     width=LINE_WIDTH, tags=SHAPES_TAG)
-        # first point is bigger and hollow so you can click it again
+        # The first point is a big hollow circle so it is easy to see and
+        # click again. The rest are small filled dots.
         for index, point in enumerate(points):
             x, y = point_to_pixel(point)
             if index == 0:
@@ -732,6 +758,8 @@ class ShapeMakerApp:
                                     x + radius, y + radius, fill=fill,
                                     outline=HIGHLIGHT, width=LINE_WIDTH,
                                     tags=SHAPES_TAG)
+
+    # Mouse and keyboard
 
     def canvas_clicked(self, event):
         point = pixel_to_point(event.x, event.y)
@@ -747,12 +775,13 @@ class ShapeMakerApp:
         except ShapeError as problem:
             self.say(str(problem), problem=True)
         else:
-            # only runs if it worked
+            # else runs only if no error was raised.
             self.say(f"Point {len(self.drawing.current)} added at {point}.")
         self.redraw()
 
     def mouse_moved(self, event):
-        # ring on the nearest grid point, and show the coords
+        # Draw a ring on the grid point a click would pick, and show its
+        # coordinates in the corner.
         self.canvas.delete(MARKER_TAG)
         point = pixel_to_point(event.x, event.y)
         if not in_grid(point):
@@ -768,6 +797,8 @@ class ShapeMakerApp:
     def mouse_left(self, event):
         self.canvas.delete(MARKER_TAG)
         self.mouse_position.set("")
+
+    # The part being drawn
 
     def finish_part(self):
         try:
@@ -795,6 +826,8 @@ class ShapeMakerApp:
         self.drawing.cancel_part()
         self.say("The unfinished part was removed.")
         self.redraw()
+
+    # Finished parts
 
     def part_selected(self, event):
         # Show the part's colours in the palettes, so picking a colour now
@@ -839,6 +872,8 @@ class ShapeMakerApp:
             self.refresh_list()
             self.say("Everything was cleared.")
             self.redraw()
+
+    # Import and export
 
     def export_text(self):
         self.export_file(".txt", "Text file", make_text)
@@ -886,7 +921,8 @@ class ShapeMakerApp:
                 f"stops Python from finding its own {module} module.")
             return False
 
-        # saving can fail (no permission, disk full etc)
+        # Saving can fail, e.g. no permission or a full disk. Show the error
+        # instead of crashing.
         try:
             with open(path, "w", encoding="utf-8") as file:
                 file.write(make(name, self.drawing.parts))
@@ -907,7 +943,8 @@ class ShapeMakerApp:
         # The file is read and checked before anything changes, so a bad
         # file leaves the current drawing untouched.
         try:
-            # utf-8-sig copes with the BOM that Notepad adds
+            # utf-8-sig also reads files saved with a byte order mark, which
+            # some Windows editors add.
             with open(path, encoding="utf-8-sig") as file:
                 name, drawing = read_drawing_file(file.read())
         except (OSError, UnicodeDecodeError) as error:
