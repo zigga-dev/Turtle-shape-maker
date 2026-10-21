@@ -69,8 +69,12 @@ MAX_LINE_LENGTH = 79  # PEP 8 line limit
 INDENT = " " * 4
 # A program saved with the name of one of Python's own modules, such as
 # turtle.py or random.py, would be imported instead of the real module, so
-# it would not run. sys.stdlib_module_names needs Python 3.10 or newer.
-BLOCKED_FILE_NAMES = sys.stdlib_module_names
+# it would not run. sys.stdlib_module_names only exists in Python 3.10 and
+# newer, so older versions fall back to the names most likely to clash.
+BLOCKED_FILE_NAMES = getattr(sys, "stdlib_module_names", frozenset((
+    "turtle", "tkinter", "random", "math", "time", "os", "sys", "json",
+    "string", "copy", "types", "code", "test", "this", "statistics",
+    "keyword", "token", "queue", "array", "select", "colorsys")))
 EXPORT_SIZE = 2  # exported shape is twice the drawing size
 EXPORT_STEP = 10  # pixels moved per key press
 EXPORT_TURN = 15  # degrees turned per key press
@@ -263,12 +267,13 @@ def check_shape_name(text):
     return name
 
 
-def suggested_file_name(name):
-    # "My Ship" becomes "my_ship". Blocked names get "_shape" added.
+def suggested_file_name(name, extension):
+    # "My Ship" becomes "my_ship.py". Only .py files can clash with
+    # Python's own modules, so only they get "_shape" added.
     stem = "_".join(name.lower().split())
-    if stem in BLOCKED_FILE_NAMES:
+    if extension == ".py" and stem in BLOCKED_FILE_NAMES:
         stem += "_shape"
-    return stem
+    return stem + extension
 
 
 def blocked_module(path):
@@ -551,6 +556,9 @@ class ShapeMakerApp:
     def __init__(self, root):
         self.root = root
         self.drawing = Drawing()
+        # Colours for the next new part. The palettes show a selected part's
+        # colours instead, so these are kept separately.
+        self.new_colours = {"fill": START_FILL, "outline": START_OUTLINE}
         self.name = tk.StringVar(value=DEFAULT_NAME)
         self.message = tk.StringVar()
         self.mouse_position = tk.StringVar()
@@ -592,7 +600,13 @@ class ShapeMakerApp:
 
     def build_panel(self, panel):
         self.add_heading(panel, "Shape name", first=True)
-        ttk.Entry(panel, textvariable=self.name).pack(fill="x")
+        name_box = ttk.Entry(panel, textvariable=self.name)
+        name_box.pack(fill="x")
+        # Enter and Escape in the name box just leave the box. Returning
+        # "break" from leave_name_box stops the window's own Enter and
+        # Escape keys from running as well.
+        name_box.bind("<Return>", self.leave_name_box)
+        name_box.bind("<Escape>", self.leave_name_box)
 
         # The lambdas tell colour_picked which palette was clicked.
         self.add_heading(panel, "Fill colour")
@@ -678,9 +692,12 @@ class ShapeMakerApp:
 
     def bind_events(self):
         self.canvas.bind("<Button-1>", self.canvas_clicked)
-        # Right-click undoes a point. Macs call the right button Button-2.
-        self.canvas.bind("<Button-2>", lambda event: self.undo_point())
+        # Right-click undoes a point. The right button is Button-3, except
+        # on Macs with older Tk, where it is Button-2. On Windows and Linux
+        # Button-2 is the middle button, so it is only bound on a Mac.
         self.canvas.bind("<Button-3>", lambda event: self.undo_point())
+        if self.root.tk.call("tk", "windowingsystem") == "aqua":
+            self.canvas.bind("<Button-2>", lambda event: self.undo_point())
         self.canvas.bind("<Motion>", self.mouse_moved)
         self.canvas.bind("<Leave>", self.mouse_left)
         self.part_list.bind("<<ListboxSelect>>", self.part_selected)
@@ -740,6 +757,20 @@ class ShapeMakerApp:
 
         self.draw_unfinished_part()
         self.canvas.tag_raise(MARKER_TAG)  # keep the mouse ring on top
+        self.show_palette_colours()
+
+    def show_palette_colours(self):
+        # The palettes show the selected part's colours, or the colours for
+        # new parts when no part is selected.
+        index = self.selected_index()
+        if index is None:
+            fill = self.new_colours["fill"]
+            outline = self.new_colours["outline"]
+        else:
+            part = self.drawing.parts[index]
+            fill, outline = part.fill, part.outline
+        self.fill_palette.show(fill)
+        self.outline_palette.show(outline)
 
     def draw_unfinished_part(self):
         points = self.drawing.current
@@ -768,14 +799,14 @@ class ShapeMakerApp:
             self.finish_part()
             return
 
-        # Deselect parts so colour picks apply to the new part.
-        self.part_list.selection_clear(0, tk.END)
         try:
             self.drawing.add_point(point)
         except ShapeError as problem:
             self.say(str(problem), problem=True)
         else:
-            # else runs only if no error was raised.
+            # else runs only if no error was raised. Deselect parts so colour
+            # picks apply to the new part.
+            self.part_list.selection_clear(0, tk.END)
             self.say(f"Point {len(self.drawing.current)} added at {point}.")
         self.redraw()
 
@@ -798,12 +829,16 @@ class ShapeMakerApp:
         self.canvas.delete(MARKER_TAG)
         self.mouse_position.set("")
 
+    def leave_name_box(self, event):
+        self.canvas.focus_set()
+        return "break"
+
     # The part being drawn
 
     def finish_part(self):
         try:
-            self.drawing.finish_part(self.fill_palette.chosen,
-                                     self.outline_palette.chosen)
+            self.drawing.finish_part(self.new_colours["fill"],
+                                     self.new_colours["outline"])
         except ShapeError as problem:
             self.say(str(problem), problem=True)
             return
@@ -830,13 +865,10 @@ class ShapeMakerApp:
     # Finished parts
 
     def part_selected(self, event):
-        # Show the part's colours in the palettes, so picking a colour now
-        # changes this part.
+        # redraw shows the part's colours in the palettes, so picking a
+        # colour now changes this part.
         index = self.selected_index()
         if index is not None:
-            part = self.drawing.parts[index]
-            self.fill_palette.show(part.fill)
-            self.outline_palette.show(part.outline)
             self.say(f"Part {index + 1} selected. Pick a colour to change "
                      "it, or press Delete to remove it.")
         self.redraw()
@@ -845,6 +877,7 @@ class ShapeMakerApp:
         # With no part selected, the colour is just used for new parts.
         index = self.selected_index()
         if index is None:
+            self.new_colours[kind] = colour
             self.say(f"New parts will have a {colour} {kind}.")
             return
         self.drawing.recolour(index, kind, colour)
@@ -909,7 +942,7 @@ class ShapeMakerApp:
             title=f"Export as {description.lower()}",
             defaultextension=extension,
             filetypes=[(description, "*" + extension)],
-            initialfile=suggested_file_name(name) + extension)
+            initialfile=suggested_file_name(name, extension))
         if not path:
             return False  # the user pressed Cancel
 
